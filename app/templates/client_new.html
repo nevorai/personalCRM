@@ -43,6 +43,11 @@
       <div style="flex:1;min-width:220px;">
         <label for="product_url">URL</label>
         <input type="text" id="product_url" name="product_url" placeholder="https://…">
+        <select name="product_platform">
+          <option value="">Which Nevorai product? (optional)</option>
+          {% for value, label in platforms %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+        </select>
+        <input type="text" name="product_tenant_id" placeholder="Tenant id inside that product (optional)">
       </div>
     </div>
 

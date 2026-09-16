@@ -26,9 +26,16 @@
   <div class="stat-card"><div class="n">{{ stats.products }}</div><div class="l">Products / websites</div></div>
   <div class="stat-card"><div class="n">{{ stats.by_status.get('active', 0) }}</div><div class="l">Active subscriptions</div></div>
   <div class="stat-card"><div class="n">₹{{ stats.mrr_paise | rupees }}</div><div class="l">Monthly recurring revenue</div></div>
+  <div class="stat-card"><div class="n">₹{{ stats.month_paise | rupees }}</div><div class="l">Collected this month</div></div>
   <div class="stat-card"><div class="n">₹{{ stats.collected_paise | rupees }}</div><div class="l">Total collected (all-time)</div></div>
   <div class="stat-card"><div class="n">₹{{ stats.pending_paise | rupees }}</div><div class="l">Pending / at-risk</div></div>
 </div>
+<p class="hint muted" style="margin-top:-6px;">
+  Every figure here is Razorpay-confirmed: MRR counts only active mandates, and collected counts
+  only captured payments. A price agreed but never charged is not revenue.
+  {% if stats.due_count %}<a href="/admin/due"><strong>{{ stats.due_count }}</strong> subscription{{ 's' if stats.due_count != 1 else '' }}
+  need attention this week.</a>{% else %}<a href="/admin/due">Nothing needs chasing this week.</a>{% endif %}
+</p>
 
 <h2>Clients</h2>
 {% if clients %}

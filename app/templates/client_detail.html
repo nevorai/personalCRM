@@ -47,15 +47,27 @@
 <div class="card">
   {% if products %}
   <table class="plain" style="margin-bottom:16px;">
-    <tr><th>Name</th><th>URL</th></tr>
-    {% for p in products %}<tr><td>{{ p.name }}</td><td>{% if p.url %}<a href="{{ p.url }}" target="_blank">{{ p.url }}</a>{% else %}—{% endif %}</td></tr>{% endfor %}
+    <tr><th>Name</th><th>URL</th><th>Product</th><th>Tenant id</th></tr>
+    {% for p in products %}<tr><td>{{ p.name }}</td><td>{% if p.url %}<a href="{{ p.url }}" target="_blank">{{ p.url }}</a>{% else %}—{% endif %}</td>
+      <td>{{ platform_label.get(p.platform, '—') if p.platform else '—' }}</td>
+      <td class="muted">{{ p.tenant_id or '—' }}</td></tr>{% endfor %}
   </table>
   {% else %}<p class="muted">No products added yet.</p>{% endif %}
   <form method="post" action="/admin/clients/{{ client.id }}/products" class="row">
-    <input type="text" name="name" placeholder="Product name" required style="flex:1;">
-    <input type="text" name="url" placeholder="https://..." style="flex:1;">
+    <input type="text" name="name" placeholder="Product name" required style="flex:1;min-width:150px;">
+    <input type="text" name="url" placeholder="https://..." style="flex:1;min-width:150px;">
+    <select name="platform" style="flex:0 0 160px;">
+      <option value="">Which product?</option>
+      {% for value, label in platforms %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <input type="text" name="tenant_id" placeholder="Tenant id (optional)" style="flex:0 0 170px;">
     <button type="submit" class="btn secondary">Add product</button>
   </form>
+  <p class="hint muted" style="margin-top:10px;">
+    The product and tenant id get stamped onto the Razorpay subscription, so later you can
+    answer “is this tenant paid up?” straight from Razorpay. Only the subscription this client
+    pays Nevorai belongs here — money their own customers pay them never touches this CRM.
+  </p>
 </div>
 
 <h2>Subscriptions</h2>

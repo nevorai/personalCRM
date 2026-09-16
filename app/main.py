@@ -35,6 +35,21 @@ app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static"), check_d
           name="static")
 T = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
+# The Nevorai products a client's site/app can be. "Custom build" is the
+# catch-all for one-off work that isn't one of the white-label platforms.
+# Tagging this (plus the tenant id inside that product) is what lets the CRM
+# answer "how much MRR does Academy OS actually make" without a human
+# remembering which client is on what.
+PLATFORMS = [
+    ("academy_os", "Academy OS"),
+    ("cafe_os", "Cafe OS"),
+    ("enarsia", "Enarsia"),
+    ("nevorai_flow", "Nevorai (Flow)"),
+    ("backupshala", "Backupshala"),
+    ("custom", "Custom build"),
+]
+PLATFORM_LABEL = dict(PLATFORMS)
+
 DEFAULT_PLANS = [
     ("Personal", 99900),
     ("Personal Plus", 119900),
@@ -103,6 +118,8 @@ def _nav_section(path):
     a nav item of its own - but /admin/clients/new is its own link."""
     if path == "/admin/clients/new":
         return "add"
+    if path.startswith("/admin/due"):
+        return "due"
     if path.startswith("/admin/plans"):
         return "plans"
     if path.startswith("/admin/showcase"):
@@ -183,7 +200,8 @@ def logout():
 # ---------------------------------------------------------------- dashboard
 def _empty_dashboard(error):
     return ([], {}, {"clients": 0, "products": 0, "subscriptions": 0, "by_status": {},
-                     "mrr_paise": 0, "collected_paise": 0, "pending_paise": 0, "error": error})
+                     "mrr_paise": 0, "collected_paise": 0, "month_paise": 0, "due_count": 0,
+                     "pending_paise": 0, "error": error})
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -243,12 +261,172 @@ def dashboard(request: Request):
                 pending_by_client.setdefault(t["client_id"], []).append(t)
         for c in clients:
             c["pending_link"] = bool(pending_by_client.get(c["id"]))
-        collected_paise = sum(p["amount_paise"] for p in payments if p["status"] == "captured")
+        captured = [p for p in payments if p["status"] == "captured"]
+        collected_paise = sum(p["amount_paise"] for p in captured)
+        # All-time collected only ever grows, so it stops being a number you
+        # can read anything from. This month's is the one that answers "is the
+        # business actually earning right now".
+        month = datetime.utcnow().strftime("%Y-%m")
+        month_paise = sum(p["amount_paise"] for p in captured
+                          if (p.get("created_at") or "").startswith(month))
+        # Money that needs chasing this week, mirrored from /admin/due so the
+        # dashboard can point at it rather than hide it.
+        due_count = sum(1 for s in subs if s["status"] in ("halted", "pending")) + \
+            sum(1 for s in subs if s["status"] == "active"
+                and (_iso_days_away(s.get("next_billing_at")) or 99) <= 7)
         stats = {"clients": len(clients), "products": len(products), "subscriptions": len(subs),
                  "by_status": by_status, "mrr_paise": mrr_paise, "collected_paise": collected_paise,
+                 "month_paise": month_paise, "due_count": due_count,
                  "pending_paise": pending_paise, "error": None}
     return T.TemplateResponse("dashboard.html", ctx(
         request, stats=stats, clients=clients, plans_by_id=plans_by_id))
+
+
+# ------------------------------------------------------------- money due
+def _iso_days_away(value):
+    """Days from now until an ISO timestamp, or None if it isn't one. Stored
+    timestamps are naive UTC (see the webhook's charge_at conversion), so the
+    comparison is made in the same frame rather than pretending to be local."""
+    if not value:
+        return None
+    try:
+        when = datetime.fromisoformat(str(value).replace("Z", "").split("+")[0])
+    except ValueError:
+        return None
+    return (when - datetime.utcnow()).total_seconds() / 86400.0
+
+
+@app.get("/admin/due", response_class=HTMLResponse)
+def money_due(request: Request):
+    """Everything with money attached that needs a human this week.
+
+    The dashboard answers "what is the business worth"; this answers "what
+    do I chase today". Four buckets, biggest rupees first inside each:
+    charges that are failing, mandates a client never finished, renewals
+    landing within a week, and what churned this month."""
+    require_admin(request)
+    try:
+        clients, subs, plans, tokens = store.fetch_many([
+            dict(table="clients", limit=500),
+            dict(table="subscriptions", limit=1000),
+            dict(table="plans", limit=500),
+            dict(table="onboard_tokens", limit=1000),
+        ])
+    except Exception as exc:
+        return T.TemplateResponse("due.html", ctx(
+            request, error="%s: %s" % (type(exc).__name__, exc),
+            failing=[], awaiting=[], renewing=[], churned=[], totals={}))
+
+    by_id = {c["id"]: c for c in clients}
+    plans_by_id = {p["id"]: p for p in plans}
+    claimed = {t["client_id"] for t in tokens if t.get("subscription_id")}
+
+    failing, awaiting, renewing, churned = [], [], [], []
+    for sub in subs:
+        client = by_id.get(sub["client_id"])
+        if not client:
+            continue
+        item = {"sub": sub, "client": client, "plan": plans_by_id.get(sub["plan_id"]),
+                "days": _iso_days_away(sub.get("next_billing_at"))}
+        status = sub["status"]
+        if status in ("halted", "pending"):
+            failing.append(item)
+        elif status in ("created", "authenticated"):
+            awaiting.append(item)
+        elif status == "active":
+            if item["days"] is not None and item["days"] <= 7:
+                renewing.append(item)
+        elif status == "cancelled":
+            since = _iso_days_away(sub.get("cancelled_at"))
+            if since is not None and since >= -30:
+                churned.append(item)
+
+    # A link generated but never opened leaves no subscription row at all, so
+    # it can only be seen in the tokens table - and it is the most commonly
+    # forgotten money in the whole app.
+    for t in tokens:
+        if t.get("subscription_id") or t["client_id"] in claimed:
+            continue
+        client = by_id.get(t["client_id"])
+        plan = plans_by_id.get(t["plan_id"])
+        if not (client and plan):
+            continue
+        awaiting.append({"sub": None, "client": client, "plan": plan, "token": t["token"],
+                         "days": _iso_days_away(t.get("created_at"))})
+
+    def amount(item):
+        return (item["sub"] or {}).get("amount_paise") or (item["plan"] or {}).get("amount_paise") or 0
+
+    for bucket in (failing, awaiting, renewing, churned):
+        bucket.sort(key=amount, reverse=True)
+
+    totals = {"failing": sum(amount(i) for i in failing),
+              "awaiting": sum(amount(i) for i in awaiting),
+              "renewing": sum(amount(i) for i in renewing),
+              "churned": sum(amount(i) for i in churned)}
+    return T.TemplateResponse("due.html", ctx(
+        request, error=None, failing=failing, awaiting=awaiting, renewing=renewing,
+        churned=churned, totals=totals))
+
+
+# --------------------------------------------------------------- accounting
+@app.get("/admin/export/payments.csv")
+def export_payments(request: Request):
+    """Every captured rupee as one CSV row, with the same GST split the PDF
+    invoice prints and the same invoice number, so what the CA files and what
+    the client received can be reconciled line by line."""
+    require_admin(request)
+    clients, subs, plans, products, payments = store.fetch_many([
+        dict(table="clients", limit=500),
+        dict(table="subscriptions", limit=1000),
+        dict(table="plans", limit=500),
+        dict(table="products", limit=10000),
+        dict(table="payments", limit=10000),
+    ])
+    subs_by_id = {x["id"]: x for x in subs}
+    clients_by_id = {c["id"]: c for c in clients}
+    plans_by_id = {p["id"]: p for p in plans}
+    products_by_id = {x["id"]: x for x in products}
+    rate = settings.gst_rate_percent() if settings.gstin() else 0
+
+    import csv, io as _io
+    buf = _io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Date", "Invoice no", "Client", "Company", "Product", "Platform", "Tenant id",
+                "Plan", "Gross (INR)", "Taxable (INR)", "GST (INR)", "GST rate %",
+                "Method", "Razorpay payment id", "Razorpay subscription id"])
+    rows = sorted([p for p in payments if p["status"] == "captured"],
+                  key=lambda p: p.get("created_at") or "")
+    for pay in rows:
+        sub = subs_by_id.get(pay["subscription_id"]) or {}
+        client = clients_by_id.get(sub.get("client_id")) or {}
+        plan = plans_by_id.get(sub.get("plan_id")) or {}
+        product = products_by_id.get(sub.get("product_id")) or {}
+        base, gst = invoice._gst_breakup(pay["amount_paise"], rate) if rate else (pay["amount_paise"], 0)
+        w.writerow([(pay.get("created_at") or "")[:10], invoice.invoice_number(pay),
+                    client.get("name", ""), client.get("company", ""),
+                    product.get("name", ""), PLATFORM_LABEL.get(product.get("platform") or "", ""),
+                    product.get("tenant_id", "") or "", plan.get("name", ""),
+                    "%.2f" % (pay["amount_paise"] / 100.0), "%.2f" % (base / 100.0),
+                    "%.2f" % (gst / 100.0), rate or "",
+                    pay.get("method", "") or "", pay.get("rzp_payment_id", "") or "",
+                    sub.get("rzp_subscription_id", "") or ""])
+    stamp = datetime.utcnow().strftime("%Y%m%d")
+    return Response(buf.getvalue(), media_type="text/csv", headers={
+        "Content-Disposition": 'attachment; filename="nevorai-payments-%s.csv"' % stamp})
+
+
+def _product_row(client_id, name, url, platform="", tenant_id=""):
+    """A product row, with the two tagging columns dropped if the migration
+    that adds them hasn't been run yet - same pattern as plans.client_id.
+    The tag is worth nothing on its own; its value is that it rides along
+    into the Razorpay subscription's notes (see subscribe_start)."""
+    row = {"client_id": client_id, "name": name.strip(), "url": url.strip(), "notes": ""}
+    if platform.strip() and store.supports("products", "platform"):
+        row["platform"] = platform.strip()
+    if tenant_id.strip() and store.supports("products", "tenant_id"):
+        row["tenant_id"] = tenant_id.strip()
+    return row
 
 
 # ------------------------------------------------------------------ clients
@@ -257,13 +435,14 @@ def client_new_form(request: Request):
     require_admin(request)
     plans = [p for p in store.list_rows("plans", order="amount_paise.asc")
              if p["active"] and not p.get("client_id")]
-    return T.TemplateResponse("client_new.html", ctx(request, plans=plans))
+    return T.TemplateResponse("client_new.html", ctx(request, plans=plans, platforms=PLATFORMS))
 
 
 @app.post("/admin/clients")
 def client_create(request: Request, name: str = Form(...), email: str = Form(""),
                   phone: str = Form(""), company: str = Form(""), notes: str = Form(""),
                   product_name: str = Form(""), product_url: str = Form(""),
+                  product_platform: str = Form(""), product_tenant_id: str = Form(""),
                   plan_id: str = Form(""), custom_amount: str = Form("")):
     """Client, product and onboarding link in one submit. Doing this in three
     round trips through three screens was the slow part of onboarding
@@ -274,8 +453,8 @@ def client_create(request: Request, name: str = Form(...), email: str = Form("")
                                    "notes": notes.strip(), "status": "active"})
     product = None
     if product_name.strip():
-        product = store.insert("products", {"client_id": row["id"], "name": product_name.strip(),
-                                            "url": product_url.strip(), "notes": ""})
+        product = store.insert("products", _product_row(
+            row["id"], product_name, product_url, product_platform, product_tenant_id))
 
     # Optional: mint the onboarding link straight away.
     chosen = None
@@ -344,6 +523,7 @@ def client_detail(request: Request, client_id: str, link: str = None):
     return T.TemplateResponse("client_detail.html", ctx(
         request, client=client, products=products, subs=subs, payments=payments,
         plans=active_plans, custom_plans=custom_plans, plans_by_id=plans_by_id,
+        platforms=PLATFORMS, platform_label=PLATFORM_LABEL,
         link_url=link_url, pending_links=pending_links,
         sent=request.query_params.get("sent")))
 
@@ -360,9 +540,10 @@ def client_edit(request: Request, client_id: str, name: str = Form(...), email: 
 
 
 @app.post("/admin/clients/{client_id}/products")
-def product_add(request: Request, client_id: str, name: str = Form(...), url: str = Form("")):
+def product_add(request: Request, client_id: str, name: str = Form(...), url: str = Form(""),
+                platform: str = Form(""), tenant_id: str = Form("")):
     require_admin(request)
-    store.insert("products", {"client_id": client_id, "name": name.strip(), "url": url.strip(), "notes": ""})
+    store.insert("products", _product_row(client_id, name, url, platform, tenant_id))
     return RedirectResponse("/admin/clients/%s" % client_id, status_code=303)
 
 
@@ -831,9 +1012,22 @@ def subscribe_start(token: str):
         sub_row = store.insert("subscriptions", {
             "client_id": client["id"], "product_id": row.get("product_id"),
             "plan_id": plan["id"], "status": "created", "amount_paise": plan["amount_paise"]})
+        # Stamping the product + tenant id on the Razorpay subscription itself
+        # is the cheapest future-proofing available: every later question
+        # ("is this tenant paid up?", "what does Academy OS earn?") can be
+        # answered from Razorpay directly, without this database being the
+        # only place the mapping exists.
+        notes = {"row_id": sub_row["id"], "client_id": client["id"],
+                 "client_name": client["name"][:200]}
+        product = store.get("products", row["product_id"]) if row.get("product_id") else None
+        if product:
+            notes["product"] = (product.get("name") or "")[:200]
+            if product.get("platform"):
+                notes["platform"] = product["platform"]
+            if product.get("tenant_id"):
+                notes["tenant_id"] = product["tenant_id"]
         created = rzp.create_subscription(
-            settings.razorpay_key_id(), settings.razorpay_key_secret(), plan_id,
-            notes={"row_id": sub_row["id"], "client_id": client["id"]})
+            settings.razorpay_key_id(), settings.razorpay_key_secret(), plan_id, notes=notes)
         store.patch("subscriptions", sub_row["id"], {"rzp_subscription_id": created["id"],
                                                       "short_url": created.get("short_url", "")})
         store.patch("onboard_tokens", row["id"], {"subscription_id": sub_row["id"]})

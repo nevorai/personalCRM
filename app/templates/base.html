@@ -27,6 +27,7 @@
 {% set nav_items = [
   ('/admin', 'Dashboard', 'dashboard'),
   ('/admin/clients/new', 'Add client', 'add'),
+  ('/admin/due', 'Money due', 'due'),
   ('/admin/plans', 'Plans', 'plans'),
   ('/admin/showcase', 'Our work', 'showcase'),
   ('/admin/settings', 'Settings', 'settings'),
@@ -163,6 +164,7 @@
   // /admin/clients/{id}, highlights Dashboard - it isn't a nav item itself).
   function navSection(path) {
     if (path === '/admin/clients/new') return 'add';
+    if (path.indexOf('/admin/due') === 0) return 'due';
     if (path.indexOf('/admin/plans') === 0) return 'plans';
     if (path.indexOf('/admin/showcase') === 0) return 'showcase';
     if (path.indexOf('/admin/settings') === 0) return 'settings';

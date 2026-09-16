@@ -79,8 +79,8 @@ write.
 3. Deploy. Check `https://<your-project>.vercel.app/healthz` →
    `"ok": true, "backend": "supabase"`.
 4. **Custom domain**: Project → Settings → Domains → add
-   `personalcrm.nevorai.com`. Vercel shows a CNAME target
-   (`cname.vercel-dns.com`) — add that as a CNAME record for `personalcrm`
+   `crm.nevorai.com`. Vercel shows a CNAME target
+   (`cname.vercel-dns.com`) — add that as a CNAME record for `crm`
    in your DNS provider's zone for `nevorai.com`. Vercel issues the TLS
    certificate automatically once the record resolves.
 

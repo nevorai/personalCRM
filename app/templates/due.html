@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Money due{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Money due</h1>
+    <p class="muted">What needs chasing this week — failing charges first, then money you're still waiting on.</p></div>
+  <a class="btn secondary" href="/admin/export/payments.csv" hx-boost="false">Export payments CSV</a>
+</div>
+
+{% if error %}
+<div class="error-box">Couldn't load live data from the database ({{ error }}).</div>
+{% endif %}
+
+<div class="stat-grid">
+  <div class="stat-card"><div class="n">₹{{ totals.get('failing', 0) | rupees }}</div><div class="l">Charges failing</div></div>
+  <div class="stat-card"><div class="n">₹{{ totals.get('awaiting', 0) | rupees }}</div><div class="l">Never completed checkout</div></div>
+  <div class="stat-card"><div class="n">₹{{ totals.get('renewing', 0) | rupees }}</div><div class="l">Renewing within 7 days</div></div>
+  <div class="stat-card"><div class="n">₹{{ totals.get('churned', 0) | rupees }}</div><div class="l">Cancelled in last 30 days</div></div>
+</div>
+
+{% macro rows(items, empty, show_days) %}
+  {% if items %}
+  <table>
+    <tr><th>Client</th><th>Plan</th><th>Amount</th><th>Status</th><th>{{ show_days }}</th></tr>
+    {% for i in items %}
+    <tr hx-get="/admin/clients/{{ i.client.id }}" hx-target="#main-content" hx-select="#main-content"
+        hx-swap="innerHTML" hx-push-url="true" style="cursor:pointer">
+      <td><strong>{{ i.client.name }}</strong><br><span class="muted">{{ i.client.email or i.client.phone or '' }}</span></td>
+      <td>{{ (i.plan or {}).get('name', '—') }}</td>
+      <td>₹{{ ((i.sub or {}).get('amount_paise') or (i.plan or {}).get('amount_paise') or 0) | rupees }}/mo</td>
+      <td>{% if i.sub %}<span class="badge {{ status_group(i.sub.status) }}">{{ status_label(i.sub.status) }}</span>
+          {% else %}<span class="badge pending">Link sent, never opened</span>{% endif %}</td>
+      <td class="muted">
+        {% if i.days is none %}—
+        {% elif i.days < 0 %}{{ (-i.days) | round | int }} days ago
+        {% else %}in {{ i.days | round | int }} days{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="card muted">{{ empty }}</div>{% endif %}
+{% endmacro %}
+
+<h2>Charges failing</h2>
+<p class="muted" style="margin-top:-8px;">Razorpay tried and the money didn't move. These are the ones worth a phone call today.</p>
+{{ rows(failing, 'Nothing failing. Every active mandate is charging cleanly.', 'Next attempt') }}
+
+<h2>Never completed checkout</h2>
+<p class="muted" style="margin-top:-8px;">A link went out and the client never finished authorising the mandate. Nothing will ever charge until they do.</p>
+{{ rows(awaiting, 'No half-finished onboardings.', 'Sent') }}
+
+<h2>Renewing within 7 days</h2>
+{{ rows(renewing, 'Nothing renewing in the next week.', 'Renews') }}
+
+<h2>Cancelled in the last 30 days</h2>
+<p class="muted" style="margin-top:-8px;">Recent churn, while a win-back conversation is still realistic.</p>
+{{ rows(churned, 'No cancellations in the last 30 days.', 'Cancelled') }}
+{% endblock %}

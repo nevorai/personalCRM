@@ -95,7 +95,8 @@ TABLES = ("clients", "products", "plans", "subscriptions", "payments", "onboard_
 # touches an existing table, so SQLite needs these applied by hand; Supabase
 # gets them from supabase/migrations/, and supports() below keeps the app
 # working in the window before that migration is run.
-ADDED_COLUMNS = (("plans", "client_id", "TEXT"), ("showcase", "image_url", "TEXT"))
+ADDED_COLUMNS = (("plans", "client_id", "TEXT"), ("showcase", "image_url", "TEXT"),
+                 ("products", "platform", "TEXT"), ("products", "tenant_id", "TEXT"))
 
 
 # ------------------------------------------------------------------ supabase
