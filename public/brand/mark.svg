@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs>
+<radialGradient id="bp" cx=".38" cy=".34" r=".75"><stop stop-color="#5c5c64"/><stop offset=".55" stop-color="#1d1d22"/><stop offset="1" stop-color="#0a0a0b"/></radialGradient>
+<radialGradient id="bq" cx=".38" cy=".34" r=".75"><stop stop-color="#d4d4d8"/><stop offset="1" stop-color="#ececef"/></radialGradient>
+<linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="32" y1="68" x2="68" y2="32"><stop stop-color="#0a0a0b" stop-opacity=".35"/><stop offset="1" stop-color="#0a0a0b" stop-opacity=".95"/></linearGradient>
+<linearGradient id="bd" gradientUnits="userSpaceOnUse" x1="32" y1="68" x2="68" y2="32"><stop stop-color="#fff" stop-opacity="0.55"/><stop offset="1" stop-color="#fff"/></linearGradient>
+<mask id="bm" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100"><rect width="100" height="100" fill="url(#bd)"/></mask></defs>
+<g transform="translate(50 50) scale(1) translate(-50 -50)"><circle cx="50" cy="32" r="5.4" fill="url(#bq)"/><circle cx="50" cy="68" r="5.4" fill="url(#bq)"/>
+<g mask="url(#bm)"><path d="M32 68V32L68 68V32" fill="none" stroke="url(#bg)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="32" cy="32" r="6" fill="url(#bp)"/><circle cx="32" cy="50" r="6" fill="url(#bp)"/><circle cx="32" cy="68" r="6" fill="url(#bp)"/><circle cx="50" cy="50" r="6" fill="url(#bp)"/><circle cx="68" cy="32" r="6" fill="url(#bp)"/><circle cx="68" cy="50" r="6" fill="url(#bp)"/><circle cx="68" cy="68" r="6" fill="url(#bp)"/></g></g></svg>
